@@ -1,0 +1,19 @@
+services:
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ikariam-calc
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/.git
+    env_file:
+      - .env
+    user: "${UID}:${GID}"
+    environment:
+      USER: "${UID}"
+      LOGNAME: "${UID}"
+    restart: never
+    container_name: ikariam-calc
+    

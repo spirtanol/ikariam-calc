@@ -1,0 +1,6 @@
+defender:
+  barbarian_club: 35
+attacker:
+  phalanx: 30
+level: 1
+type: army
