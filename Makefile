@@ -1,6 +1,5 @@
 DC = docker compose
 FILE ?= example.yml
-OUT ?= result.yml
 
 .PHONY: shell cost battle
 
