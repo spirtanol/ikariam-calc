@@ -91,8 +91,9 @@ UNITS: dict[str, Unit] = {
             health=3080,
             armor=280,
             attack=Attack(damage=1020, accuracy=70),
-            extra_attack=Attack(damage=560, accuracy=50, ammo=7),
+            extra_attack=Attack(damage=560, accuracy=50),
             size=2,
+            ammo=7
         ),
         Unit(
             name="catapult_ship",
@@ -102,8 +103,9 @@ UNITS: dict[str, Unit] = {
             health=2960,
             armor=200,
             attack=Attack(damage=620, accuracy=70),
-            extra_attack=Attack(damage=900, accuracy=30, ammo=6),
+            extra_attack=Attack(damage=900, accuracy=30),
             size=3,
+            ammo=6
         ),
         Unit(
             name="mortar_ship",
@@ -113,8 +115,9 @@ UNITS: dict[str, Unit] = {
             health=3080,
             armor=120,
             attack=Attack(damage=740, accuracy=50),
-            extra_attack=Attack(damage=1380, accuracy=10, ammo=5),
+            extra_attack=Attack(damage=1380, accuracy=10),
             size=4,
+            ammo=5
         ),
         Unit(
             name="rocket_ship",
@@ -124,8 +127,9 @@ UNITS: dict[str, Unit] = {
             health=1300,
             armor=120,
             attack=Attack(damage=400, accuracy=70),
-            extra_attack=Attack(damage=7600, accuracy=20, ammo=2),
+            extra_attack=Attack(damage=7600, accuracy=20),
             size=4,
+            ammo=2
         ),
         Unit(
             name="submarine",
@@ -135,8 +139,9 @@ UNITS: dict[str, Unit] = {
             health=2200,
             armor=120,
             attack=Attack(damage=1800, accuracy=80),
-            extra_attack=Attack(damage=2460, accuracy=80, ammo=4),
+            extra_attack=Attack(damage=2460, accuracy=80),
             size=3,
+            ammo=4
         ),
         Unit(
             name="steam_ship",
@@ -145,8 +150,9 @@ UNITS: dict[str, Unit] = {
             upkeep=5,
             health=400,
             armor=0,
-            attack=Attack(damage=240, accuracy=90, ammo=5),
+            attack=Attack(damage=240, accuracy=90),
             size=1,
+            ammo=5
         ),
         Unit(
             name="carrier_ship",
@@ -155,8 +161,9 @@ UNITS: dict[str, Unit] = {
             upkeep=100,
             health=2800,
             armor=0,
-            attack=Attack(damage=2000, accuracy=50, ammo=5),
+            attack=Attack(damage=2000, accuracy=50),
             size=5,
+            ammo=5
         ),
     )
 }
@@ -167,7 +174,7 @@ ORDERS: dict[Line, tuple[str, ...]] = {
         # Варвары
     ),
     Line.FLANK: (
-        "ram_ship"
+        "ram_ship",
         # Варвары
     ),
     Line.LONG_RANGE: (
@@ -183,7 +190,7 @@ ORDERS: dict[Line, tuple[str, ...]] = {
         # Варвары
     ),
     Line.BOMBER: (
-        "carrier_ship"
+        "carrier_ship",
         # Варвары
     ),
 }

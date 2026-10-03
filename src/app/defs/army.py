@@ -111,8 +111,9 @@ UNITS: dict[str, Unit] = {
             health=160,
             armor=0,
             attack=Attack(damage=40, accuracy=60),
-            extra_attack=Attack(damage=60, accuracy=20, ammo=5),
+            extra_attack=Attack(damage=60, accuracy=20),
             size=1,
+            ammo=5
         ),
         Unit(
             name="archer",
@@ -122,8 +123,9 @@ UNITS: dict[str, Unit] = {
             health=320,
             armor=0,
             attack=Attack(damage=100, accuracy=60),
-            extra_attack=Attack(damage=100, accuracy=40, ammo=3),
+            extra_attack=Attack(damage=100, accuracy=40),
             size=1,
+            ammo=3
         ),
         Unit(
             name="gyrocopter",
@@ -166,8 +168,9 @@ UNITS: dict[str, Unit] = {
             health=1080,
             armor=0,
             attack=Attack(damage=80, accuracy=20),
-            extra_attack=Attack(damage=2660, accuracy=10, ammo=5),
+            extra_attack=Attack(damage=2660, accuracy=10),
             size=5,
+            ammo=5
         ),
         Unit(
             name="mortar",
@@ -177,8 +180,9 @@ UNITS: dict[str, Unit] = {
             health=640,
             armor=0,
             attack=Attack(damage=200, accuracy=20),
-            extra_attack=Attack(damage=5400, accuracy=10, ammo=3),
+            extra_attack=Attack(damage=5400, accuracy=10),
             size=5,
+            ammo=3
         ),
         # Варвары
         Unit(
@@ -229,8 +233,9 @@ UNITS: dict[str, Unit] = {
             health=320,
             armor=0,
             attack=Attack(damage=100, accuracy=60),
-            extra_attack=Attack(damage=200, accuracy=30, ammo=7),
+            extra_attack=Attack(damage=200, accuracy=30),
             size=1,
+            ammo=7
         ),
         Unit(
             name="barbarian_ram",
@@ -251,8 +256,9 @@ UNITS: dict[str, Unit] = {
             health=640,
             armor=0,
             attack=Attack(damage=200, accuracy=20),
-            extra_attack=Attack(damage=5400, accuracy=20, ammo=5),
+            extra_attack=Attack(damage=5400, accuracy=20),
             size=5,
+            ammo=5
         ),
         Unit(
             name="barbarian_gyrocopter",
