@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Ikariam battle</title>
+<style>
+  body { font-family: sans-serif; margin: 1rem; }
+  .switch { display: flex; gap: 1rem; margin-bottom: 0.5rem; }
+  form[hidden], #report[hidden], textarea[hidden] { display: none; }
+  .level { margin: 0.5rem 0; }
+  .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .unit { display: flex; justify-content: space-between; gap: 0.5rem; margin: 0.15rem 0; }
+  .unit input { width: 5rem; }
+  h2, h3, h4 { font-size: 1rem; margin: 0.6rem 0 0.2rem; }
+  #report > section { margin: 1rem 0; padding: 0.75rem 1rem; border: 1px solid color-mix(in srgb, CanvasText 35%, transparent); border-radius: 0.25rem; }
+  #report > section > h2 { margin-top: 0; padding-bottom: 0.3rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 25%, transparent); }
+  #report p { margin: 0.15rem 0; }
+  textarea { width: 100%; height: 30vh; font-family: ui-monospace, monospace; }
+  button { margin: 0.5rem 0; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.1/js-yaml.min.js"></script>
+</head>
+<body>
+<div class="switch">
+  <label><input type="radio" name="kind" value="army" checked> Сухопутные</label>
+  <label><input type="radio" name="kind" value="navy"> Флот</label>
+</div>
+<div id="forms"></div>
+<button id="run" type="button">Посчитать</button>
+<div class="switch">
+  <label><input type="radio" name="view" value="html" checked> Отчёт</label>
+  <label><input type="radio" name="view" value="yaml"> YAML</label>
+</div>
+<div id="report"></div>
+<textarea id="output" spellcheck="false" readonly hidden></textarea>
+<script>
+"use strict";
+
+const LINE_ORDER = ["melee", "flank", "long_range", "artillery", "fighter", "bomber"];
+const HOLDING_LINES = new Set(["melee", "flank", "long_range", "artillery"]);
+const ATTACKS = [
+  ["fighter", ["bomber", "fighter"]],
+  ["bomber", ["artillery", "long_range", "melee", "flank"]],
+  ["flank", ["flank", "long_range", "artillery", "melee"]],
+  ["artillery", ["melee", "flank"]],
+  ["long_range", ["melee", "flank", "long_range"]],
+  ["melee", ["melee", "long_range", "artillery", "flank"]],
+];
+
+function layout(cellCount, cellSize) {
+  return { cell_count: cellCount, cell_size: cellSize };
+}
+
+function attack(damage, accuracy) {
+  return { damage, accuracy };
+}
+
+function makeUnit(spec) {
+  return {
+    name: spec.name,
+    line: spec.line,
+    cost: spec.cost,
+    upkeep: spec.upkeep,
+    health: spec.health,
+    armor: spec.armor,
+    attack: spec.attack,
+    extra_attack: spec.extra_attack === undefined ? null : spec.extra_attack,
+    ammo: spec.ammo === undefined ? null : spec.ammo,
+    size: spec.size,
+    title: spec.title
+  };
+}
+
+function makeForces(unitList, orders) {
+  const units = {};
+  for (const unit of unitList) units[unit.name] = unit;
+  return { units, orders };
+}
+
+function makeBattlefield(spec) {
+  return {
+    melee: spec.melee,
+    flank: spec.flank === undefined ? null : spec.flank,
+    long_range: spec.long_range,
+    artillery: spec.artillery,
+    fighter: spec.fighter,
+    bomber: spec.bomber,
+  };
+}
+
+const ARMY_BATTLEFIELDS = {
+  1: makeBattlefield({
+    melee: layout(3, 30),
+    long_range: layout(3, 30),
+    artillery: layout(1, 30),
+    fighter: layout(1, 10),
+    bomber: layout(1, 10),
+  }),
+  2: makeBattlefield({
+    melee: layout(5, 30),
+    flank: layout(2, 30),
+    long_range: layout(5, 30),
+    artillery: layout(2, 30),
+    fighter: layout(1, 20),
+    bomber: layout(1, 20),
+  }),
+  3: makeBattlefield({
+    melee: layout(7, 30),
+    flank: layout(4, 30),
+    long_range: layout(7, 30),
+    artillery: layout(3, 30),
+    fighter: layout(1, 30),
+    bomber: layout(1, 30),
+  }),
+  4: makeBattlefield({
+    melee: layout(7, 40),
+    flank: layout(6, 30),
+    long_range: layout(7, 40),
+    artillery: layout(4, 30),
+    fighter: layout(2, 20),
+    bomber: layout(2, 20),
+  }),
+  5: makeBattlefield({
+    melee: layout(7, 50),
+    flank: layout(6, 40),
+    long_range: layout(7, 50),
+    artillery: layout(5, 30),
+    fighter: layout(2, 30),
+    bomber: layout(2, 30),
+  }),
+};
+
+const ARMY = makeForces([
+  makeUnit({ name: "phalanx", line: "melee", cost: { wood: 40, sulfur: 30 }, upkeep: 3, health: 1120, armor: 20, attack: attack(360, 90), size: 1, title: 'Фаланга' }),
+  makeUnit({ name: "steam_giant", line: "melee", cost: { wood: 130, sulfur: 180 }, upkeep: 12, health: 3680, armor: 60, attack: attack(840, 80), size: 3, title: 'Паровой гигант' }),
+  makeUnit({ name: "spearman", line: "flank", cost: { wood: 30 }, upkeep: 1, health: 260, armor: 0, attack: attack(80, 70), size: 1, title: 'Копейщик' }),
+  makeUnit({ name: "swordsman", line: "flank", cost: { wood: 30, sulfur: 30 }, upkeep: 4, health: 360, armor: 0, attack: attack(200, 90), size: 1, title: 'Мечник' }),
+  makeUnit({ name: "shooter", line: "long_range", cost: { wood: 50, sulfur: 150 }, upkeep: 3, health: 240, armor: 0, attack: attack(60, 60), extra_attack: attack(580, 70), size: 4, ammo: 3, title: 'Стрелок' }),
+  makeUnit({ name: "slinger", line: "long_range", cost: { wood: 20 }, upkeep: 2, health: 160, armor: 0, attack: attack(40, 60), extra_attack: attack(60, 20), size: 1, ammo: 5, title: 'Пращник' }),
+  makeUnit({ name: "archer", line: "long_range", cost: { wood: 30, sulfur: 25 }, upkeep: 4, health: 320, armor: 0, attack: attack(100, 60), extra_attack: attack(100, 40), size: 1, ammo: 3, title: 'Лучник' }),
+  makeUnit({ name: "gyrocopter", line: "fighter", cost: { wood: 25, sulfur: 100 }, upkeep: 15, health: 580, armor: 0, attack: attack(340, 80), ammo: 4, size: 1, title: 'Гирокоптер' }),
+  makeUnit({ name: "bomber", line: "bomber", cost: { wood: 40, sulfur: 250 }, upkeep: 45, health: 800, armor: 0, attack: attack(960, 20), ammo: 2, size: 2, title: 'Бомбардировщик' }),
+  makeUnit({ name: "ram", line: "artillery", cost: { wood: 220 }, upkeep: 15, health: 1760, armor: 20, attack: attack(240, 70), extra_attack: attack(1600, 10), size: 5, title: 'Таран' }),
+  makeUnit({ name: "catapult", line: "artillery", cost: { wood: 260, sulfur: 300 }, upkeep: 25, health: 1080, armor: 0, attack: attack(80, 20), extra_attack: attack(2660, 10), size: 5, ammo: 5, title: 'Катапульта' }),
+  makeUnit({ name: "mortar", line: "artillery", cost: { wood: 300, sulfur: 1250 }, upkeep: 30, health: 640, armor: 0, attack: attack(200, 20), extra_attack: attack(5400, 10), size: 5, ammo: 3, title: 'Мортира' }),
+  makeUnit({ name: "barbarian_club", line: "melee", cost: {}, upkeep: 0, health: 240, armor: 20, attack: attack(100, 85), size: 1, title: 'Варвар с дубиной' }),
+  makeUnit({ name: "barbarian_axe", line: "melee", cost: {}, upkeep: 0, health: 1120, armor: 20, attack: attack(360, 90), size: 1, title: 'Варвар с топором' }),
+  makeUnit({ name: "barbarian_steam_giant", line: "melee", cost: {}, upkeep: 0, health: 3680, armor: 60, attack: attack(840, 80), size: 3, title: 'Варвар - военный скороход' }),
+  makeUnit({ name: "barbarian_knife", line: "flank", cost: {}, upkeep: 0, health: 360, armor: 0, attack: attack(200, 90), size: 1, title: 'Варвар-убийца' }),
+  makeUnit({ name: "barbarian_axe_thrower", line: "long_range", cost: {}, upkeep: 0, health: 320, armor: 0, attack: attack(100, 60), extra_attack: attack(200, 30), size: 1, ammo: 7, title: 'Варвар - метатель топора' }),
+  makeUnit({ name: "barbarian_ram", line: "artillery", cost: {}, upkeep: 0, health: 1400, armor: 20, attack: attack(200, 20), extra_attack: attack(2100, 20), size: 5, title: 'Таран варваров' }),
+  makeUnit({ name: "barbarian_catapult", line: "artillery", cost: {}, upkeep: 0, health: 640, armor: 0, attack: attack(200, 20), extra_attack: attack(5400, 20), size: 5, ammo: 5, title: 'Катапульта варваров' }),
+  makeUnit({ name: "barbarian_gyrocopter", line: "fighter", cost: {}, upkeep: 0, health: 580, armor: 0, attack: attack(340, 80), ammo: 4, size: 1, title: 'Истребитель варваров' }),
+  makeUnit({ name: "barbarian_bomber", line: "bomber", cost: {}, upkeep: 0, health: 800, armor: 0, attack: attack(960, 20), ammo: 2, size: 2, title: 'Дирижабль варваров' }),
+], {
+  melee: ["phalanx", "steam_giant", "swordsman", "spearman", "shooter", "archer", "slinger", "barbarian_club", "barbarian_axe", "barbarian_steam_giant", "barbarian_knife", "barbarian_axe_thrower"],
+  flank: ["swordsman", "spearman", "barbarian_knife"],
+  long_range: ["shooter", "archer", "slinger", "barbarian_axe_thrower"],
+  artillery: ["mortar", "catapult", "ram", "barbarian_catapult", "barbarian_ram"],
+  fighter: ["gyrocopter", "barbarian_gyrocopter"],
+  bomber: ["bomber", "barbarian_bomber"],
+});
+
+const NAVY_BATTLEFIELDS = {
+  1: makeBattlefield({
+    melee: layout(3, 15),
+    long_range: layout(3, 15),
+    artillery: layout(1, 15),
+    fighter: layout(1, 10),
+    bomber: layout(1, 10),
+  }),
+  2: makeBattlefield({
+    melee: layout(5, 15),
+    flank: layout(2, 15),
+    long_range: layout(5, 15),
+    artillery: layout(2, 15),
+    fighter: layout(1, 10),
+    bomber: layout(1, 10),
+  }),
+  3: makeBattlefield({
+    melee: layout(7, 15),
+    flank: layout(4, 15),
+    long_range: layout(7, 15),
+    artillery: layout(3, 15),
+    fighter: layout(1, 15),
+    bomber: layout(1, 15),
+  }),
+  4: makeBattlefield({
+    melee: layout(7, 20),
+    flank: layout(6, 15),
+    long_range: layout(7, 20),
+    artillery: layout(4, 15),
+    fighter: layout(2, 10),
+    bomber: layout(2, 10),
+  }),
+  5: makeBattlefield({
+    melee: layout(7, 20),
+    flank: layout(6, 15),
+    long_range: layout(7, 20),
+    artillery: layout(4, 15),
+    fighter: layout(2, 10),
+    bomber: layout(2, 10),
+  }),
+};
+
+const NAVY = makeForces([
+  makeUnit({ name: "flamethrower_ship", line: "melee", cost: { wood: 80, sulfur: 230 }, upkeep: 25, health: 4380, armor: 160, attack: attack(1640, 50), size: 2, title: 'Огнеметный корабль' }),
+  makeUnit({ name: "steam_ram_ship", line: "melee", cost: { wood: 400, sulfur: 800 }, upkeep: 45, health: 11520, armor: 320, attack: attack(3320, 90), size: 5, title: 'Паровой таран' }),
+  makeUnit({ name: "ram_ship", line: "flank", cost: { wood: 250 }, upkeep: 15, health: 3080, armor: 180, attack: attack(1500, 80), size: 3, title: 'Корабль с тараном' }),
+  makeUnit({ name: "ballista_ship", line: "long_range", cost: { wood: 180, sulfur: 160 }, upkeep: 20, health: 3080, armor: 280, attack: attack(1020, 70), extra_attack: attack(560, 50), size: 2, ammo: 7, title: 'Корабль с баллистой' }),
+  makeUnit({ name: "catapult_ship", line: "long_range", cost: { wood: 180, sulfur: 140 }, upkeep: 35, health: 2960, armor: 200, attack: attack(620, 70), extra_attack: attack(900, 30), size: 3, ammo: 6, title: 'Корабль с катапультой' }),
+  makeUnit({ name: "mortar_ship", line: "long_range", cost: { wood: 220, sulfur: 900 }, upkeep: 50, health: 3080, armor: 120, attack: attack(740, 50), extra_attack: attack(1380, 10), size: 4, ammo: 5, title: 'Корабль с мортирой' }),
+  makeUnit({ name: "rocket_ship", line: "artillery", cost: { wood: 200, sulfur: 1200 }, upkeep: 55, health: 1300, armor: 120, attack: attack(400, 70), extra_attack: attack(7600, 20), size: 4, ammo: 2, title: 'Ракетоносец' }),
+  makeUnit({ name: "submarine", line: "artillery", cost: { wood: 160, sulfur: 100, crystal: 750 }, upkeep: 50, health: 2200, armor: 120, attack: attack(1800, 80), extra_attack: attack(2460, 80), size: 3, ammo: 4, title: 'Подводная лодка' }),
+  makeUnit({ name: "steam_ship", line: "fighter", cost: { wood: 40, sulfur: 280 }, upkeep: 5, health: 400, armor: 0, attack: attack(240, 90), size: 1, ammo: 5, title: 'Пароход' }),
+  makeUnit({ name: "carrier_ship", line: "bomber", cost: { wood: 700, sulfur: 700 }, upkeep: 100, health: 2800, armor: 0, attack: attack(2000, 50), size: 5, ammo: 5, title: 'Авианосец' }),
+], {
+  melee: ["steam_ram_ship", "flamethrower_ship", "ram_ship", "ballista_ship", "catapult_ship", "mortar_ship"],
+  flank: ["ram_ship"],
+  long_range: ["mortar_ship", "catapult_ship", "ballista_ship"],
+  artillery: ["rocket_ship", "submarine"],
+  fighter: ["steam_ship"],
+  bomber: ["carrier_ship"],
+});
+
+const CATALOGS = {
+  army: { forces: ARMY, battlefields: ARMY_BATTLEFIELDS },
+  navy: { forces: NAVY, battlefields: NAVY_BATTLEFIELDS },
+};
+
+class AccuracyBuffer {
+  constructor() {
+    this._value = 0;
+  }
+
+  strike(accuracy) {
+    if (!Number.isInteger(accuracy) || accuracy < 0 || accuracy > 100) {
+      throw new Error(`accuracy must be an integer from 0 to 100: ${accuracy}`);
+    }
+    this._value += accuracy;
+    if (this._value < 100) return false;
+    this._value -= 100;
+    return true;
+  }
+}
+
+class BattlefieldLine {
+  constructor(cellCount, cellSize) {
+    this._cellSize = cellSize;
+    this._cellsLeft = cellCount;
+    this._slotsLeft = 0;
+    this._last = null;
+    this.units = new Map();
+  }
+
+  place(unit, state) {
+    if (this._last !== unit) {
+      if (!this._open(unit)) return false;
+    } else if (this._slotsLeft === 0 && !this._open(unit)) {
+      return false;
+    }
+    this._slotsLeft -= 1;
+    if (!this.units.has(unit)) this.units.set(unit, []);
+    this.units.get(unit).push(state);
+    return true;
+  }
+
+  _open(unit) {
+    if (this._cellsLeft === 0) return false;
+    this._cellsLeft -= 1;
+    this._slotsLeft = Math.floor(this._cellSize / unit.size);
+    this._last = unit;
+    return true;
+  }
+
+  *getTarget() {
+    while (true) {
+      let hasAlive = false;
+      for (const [unit, states] of this.units) {
+        for (const state of states) {
+          if (state.health <= 0) continue;
+          yield [unit, state];
+          hasAlive = hasAlive || state.health > 0;
+        }
+      }
+      if (!hasAlive) return;
+    }
+  }
+}
+
+class Battle {
+  constructor(battlefield, attacker, defender, forces) {
+    this.battlefield = battlefield;
+    this.forces = forces;
+    this.attacker = this._side(attacker);
+    this.defender = this._side(defender);
+    this._attackerBuffer = new AccuracyBuffer();
+    this._defenderBuffer = new AccuracyBuffer();
+  }
+
+  playRound() {
+    const attacker = this._field(this.attacker);
+    const defender = this._field(this.defender);
+    const attackerBefore = this._snapshot(attacker);
+    const defenderBefore = this._snapshot(defender);
+    const attackerLosses = new Map();
+    const defenderLosses = new Map();
+    for (const [attackLine, targetNames] of ATTACKS) {
+      this._volley(attacker, defender, this._attackerBuffer, defenderLosses, attackLine, targetNames);
+      this._volley(defender, attacker, this._defenderBuffer, attackerLosses, attackLine, targetNames);
+      this._purge(attacker, this.attacker);
+      this._purge(defender, this.defender);
+    }
+    return {
+      attacker,
+      defender,
+      attackerLosses,
+      defenderLosses,
+      winner: this._winner(),
+      attackerBefore,
+      defenderBefore,
+    };
+  }
+
+  _snapshot(field) {
+    const shot = new Map();
+    for (const [line, battleLine] of field.lines) {
+      const units = new Map();
+      for (const [unit, states] of battleLine.units) {
+        const count = states.length;
+        if (count === 0) continue;
+        let health = states.reduce((sum, state) => sum + state.health, 0) / count;
+        health = health / unit.health;
+        let ammo = null;
+        if (unit.ammo !== null) {
+          ammo = states.reduce((sum, state) => sum + (state.ammo || 0), 0) / count;
+        }
+        units.set(unit, { count, health, ammo });
+      }
+      if (units.size) shot.set(line, units);
+    }
+    return shot;
+  }
+
+  _winner() {
+    if (!this._holds(this.attacker)) return "defender";
+    if (!this._holds(this.defender)) return "attacker";
+    return "draw";
+  }
+
+  _holds(side) {
+    for (const unit of side.keys()) {
+      if (HOLDING_LINES.has(unit.line)) return true;
+    }
+    return false;
+  }
+
+  _field(side) {
+    const engaged = new Map();
+    const lines = new Map();
+    lines.set("melee", this._fillMelee(side, engaged));
+    if (this.battlefield.flank !== null) {
+      lines.set("flank", this._fill(side, engaged, this.battlefield.flank, "flank"));
+    }
+    lines.set("long_range", this._fill(side, engaged, this.battlefield.long_range, "long_range"));
+    lines.set("artillery", this._fill(side, engaged, this.battlefield.artillery, "artillery"));
+    lines.set("fighter", this._fill(side, engaged, this.battlefield.fighter, "fighter"));
+    lines.set("bomber", this._fill(side, engaged, this.battlefield.bomber, "bomber"));
+    return { lines, reserve: this._reserve(side, engaged) };
+  }
+
+  _volley(attackers, defenders, buffer, losses, attackLine, targetNames) {
+    if (!attackers.lines.has(attackLine)) return;
+    const streams = [];
+    for (const name of targetNames) {
+      if (defenders.lines.has(name)) streams.push(defenders.lines.get(name).getTarget());
+    }
+    let index = 0;
+    const wounded = [];
+    for (const [unit, states] of attackers.lines.get(attackLine).units) {
+      for (const state of states) {
+        const focus = buffer.strike(unit.attack.accuracy);
+        while (index < streams.length) {
+          let targetUnit = null;
+          let targetState = null;
+          while (focus && wounded.length && targetUnit === null) {
+            [targetUnit, targetState] = wounded[0];
+            if (targetState.health <= 0) {
+              wounded.shift();
+              targetUnit = null;
+            }
+          }
+          if (targetUnit === null) {
+            const step = streams[index].next();
+            if (step.done) {
+              index += 1;
+              continue;
+            }
+            [targetUnit, targetState] = step.value;
+          }
+          let blow = unit.attack;
+          if (unit.extra_attack !== null && (state.ammo === null || state.ammo > 0)) {
+            blow = unit.extra_attack;
+          }
+          const damage = Math.max(0, blow.damage - targetUnit.armor);
+          if (damage > 0) {
+            targetState.health -= damage;
+            if (targetState.health <= 0) {
+              losses.set(targetUnit, (losses.get(targetUnit) ?? 0) + 1);
+              if (focus && wounded.length) wounded.shift();
+            } else if (wounded.every((pair) => pair[1] !== targetState)) {
+              wounded.push([targetUnit, targetState]);
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  _purge(field, side) {
+    for (const line of field.lines.values()) {
+      const alive = new Map();
+      for (const [unit, states] of line.units) {
+        const living = states.filter((state) => state.health > 0);
+        if (living.length) alive.set(unit, living);
+      }
+      line.units = alive;
+    }
+    for (const unit of [...side.keys()]) {
+      const survivors = side.get(unit).filter((state) => state.health > 0);
+      if (survivors.length) side.set(unit, survivors);
+      else side.delete(unit);
+    }
+  }
+
+  _reserve(side, engaged) {
+    const reserve = new Map();
+    for (const [unit, states] of side) {
+      const waiting = states.length - (engaged.get(unit) ?? 0);
+      if (waiting) reserve.set(unit, waiting);
+    }
+    return reserve;
+  }
+
+  _fillMelee(side, engaged) {
+    const line = new BattlefieldLine(this.battlefield.melee.cell_count, this.battlefield.melee.cell_size);
+    for (const key of this.forces.orders.melee) {
+      const unit = this.forces.units[key];
+      const states = side.get(unit) ?? [];
+      let count = engaged.get(unit) ?? 0;
+      let index = states.length - 1 - count;
+      while (index >= 0) {
+        const state = states[index];
+        if (state.ammo !== null && state.ammo !== 0) break;
+        if (!line.place(unit, state)) return line;
+        count += 1;
+        engaged.set(unit, count);
+        index -= 1;
+      }
+    }
+    return line;
+  }
+
+  _fill(side, engaged, layoutSpec, lineName) {
+    const line = new BattlefieldLine(layoutSpec.cell_count, layoutSpec.cell_size);
+    for (const key of this.forces.orders[lineName]) {
+      const unit = this.forces.units[key];
+      const states = side.get(unit) ?? [];
+      let count = engaged.get(unit) ?? 0;
+      let skipped = 0;
+      while (true) {
+        const index = states.length - 1 - count - skipped;
+        if (index < 0) break;
+        const state = states[index];
+        if (unit.ammo !== null && (state.ammo === null || state.ammo === 0)) {
+          skipped += 1;
+          continue;
+        }
+        if (!line.place(unit, state)) return line;
+        count += 1;
+        engaged.set(unit, count);
+      }
+    }
+    return line;
+  }
+
+  _side(composition) {
+    const side = new Map();
+    for (const [key, count] of Object.entries(composition)) {
+      const unit = this.forces.units[key];
+      if (unit === undefined) throw new Error(`unknown unit: ${key}`);
+      if (count < 1) throw new Error(`unit count must be at least 1: ${key}`);
+      const states = [];
+      for (let i = 0; i < count; i += 1) states.push({ health: unit.health, ammo: unit.ammo });
+      side.set(unit, states);
+    }
+    return side;
+  }
+}
+
+function armyCost(composition, units) {
+  const resources = {};
+  let upkeep = 0;
+  for (const [key, count] of Object.entries(composition)) {
+    const unit = units[key];
+    if (unit === undefined) throw new Error(`unknown unit: ${key}`);
+    if (count < 1) throw new Error(`unit count must be at least 1: ${key}`);
+    for (const [resource, amount] of Object.entries(unit.cost)) {
+      resources[resource] = (resources[resource] || 0) + amount * count;
+    }
+    upkeep += unit.upkeep * count;
+  }
+  return { resources, upkeep };
+}
+
+function namedCounts(counts) {
+  const named = {};
+  for (const [unit, count] of counts) named[unit.name] = count;
+  return named;
+}
+
+function fieldReport(before) {
+  const report = {};
+  for (const line of LINE_ORDER) {
+    const units = before.get(line);
+    if (!units || units.size === 0) continue;
+    report[line] = {};
+    for (const [unit, shot] of units) {
+      const row = { count: shot.count, health: shot.health };
+      if (shot.ammo !== null) row.ammo = shot.ammo;
+      report[line][unit.name] = row;
+    }
+  }
+  return report;
+}
+
+function sideRound(field, losses, before, units) {
+  const lost = namedCounts(losses);
+  const priced = armyCost(lost, units);
+  return {
+    field: fieldReport(before),
+    losses: lost,
+    reserve: namedCounts(field.reserve),
+    resources: priced.resources,
+    upkeep: priced.upkeep,
+  };
+}
+
+function composition(raw) {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const result = {};
+  for (const [key, count] of Object.entries(raw)) {
+    if (typeof count !== "number" || !Number.isInteger(count)) {
+      throw new Error("side must be a mapping of unit to count");
+    }
+    result[key] = count;
+  }
+  return result;
+}
+
+function runBattle(loaded) {
+  if (loaded.type !== "army" && loaded.type !== "navy") {
+    throw new Error("type must be army or navy");
+  }
+  const catalog = CATALOGS[loaded.type];
+  const level = loaded.level;
+  if (typeof level !== "number" || !Number.isInteger(level) || catalog.battlefields[level] === undefined) {
+    throw new Error("level must be an integer from 1 to 5");
+  }
+  const units = catalog.forces.units;
+  const fight = new Battle(
+    catalog.battlefields[level],
+    composition(loaded.attacker),
+    composition(loaded.defender),
+    catalog.forces,
+  );
+  const rounds = [];
+  let winner = "draw";
+  while (winner === "draw") {
+    const fought = fight.playRound();
+    rounds.push(fought);
+    winner = fought.winner;
+  }
+  const attackerLosses = {};
+  const defenderLosses = {};
+  const report = [];
+  for (const fought of rounds) {
+    for (const [unit, count] of fought.attackerLosses) {
+      attackerLosses[unit.name] = (attackerLosses[unit.name] || 0) + count;
+    }
+    for (const [unit, count] of fought.defenderLosses) {
+      defenderLosses[unit.name] = (defenderLosses[unit.name] || 0) + count;
+    }
+    report.push({
+      attacker: sideRound(fought.attacker, fought.attackerLosses, fought.attackerBefore, units),
+      defender: sideRound(fought.defender, fought.defenderLosses, fought.defenderBefore, units),
+    });
+  }
+  return {
+    winner,
+    rounds: report,
+    totals: {
+      attacker: armyCost(attackerLosses, units),
+      defender: armyCost(defenderLosses, units),
+    },
+  };
+}
+
+const LINE_LABELS = {
+  melee: "ближний бой",
+  flank: "фланги",
+  long_range: "дальний бой",
+  artillery: "артиллерия",
+  fighter: "истребители",
+  bomber: "бомбардировщики",
+};
+
+function unitsByLine(forces) {
+  const grouped = {};
+  for (const line of LINE_ORDER) grouped[line] = [];
+  for (const unit of Object.values(forces.units)) grouped[unit.line].push(unit);
+  return grouped;
+}
+
+function fillColumn(column, forces, side) {
+  const grouped = unitsByLine(forces);
+  for (const line of LINE_ORDER) {
+    if (!grouped[line].length) continue;
+    const heading = document.createElement("h3");
+    heading.textContent = LINE_LABELS[line];
+    column.append(heading);
+    for (const unit of grouped[line]) {
+      const row = document.createElement("label");
+      row.className = "unit";
+      const name = document.createElement("span");
+      name.textContent = unit.title;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "1";
+      input.dataset.side = side;
+      input.dataset.unit = unit.name;
+      row.append(name, input);
+      column.append(row);
+    }
+  }
+}
+
+function buildForm(type, forces) {
+  const form = document.createElement("form");
+  form.dataset.type = type;
+  form.hidden = type !== "army";
+  form.addEventListener("submit", (event) => event.preventDefault());
+
+  const levelLabel = document.createElement("label");
+  levelLabel.className = "level";
+  levelLabel.append("Уровень ");
+  const select = document.createElement("select");
+  for (let level = 1; level <= 5; level += 1) {
+    const option = document.createElement("option");
+    option.value = String(level);
+    option.textContent = String(level);
+    select.append(option);
+  }
+  levelLabel.append(select);
+  form.append(levelLabel);
+
+  const sides = document.createElement("div");
+  sides.className = "sides";
+  for (const [side, title] of [["defender", "Защитник"], ["attacker", "Нападающий"]]) {
+    const column = document.createElement("section");
+    const heading = document.createElement("h2");
+    heading.textContent = title;
+    column.append(heading);
+    fillColumn(column, forces, side);
+    sides.append(column);
+  }
+  form.append(sides);
+  return form;
+}
+
+function readSide(form, side) {
+  const composition = {};
+  for (const input of form.querySelectorAll(`input[data-side="${side}"]`)) {
+    const raw = input.value.trim();
+    if (raw === "") continue;
+    const count = Number(raw);
+    if (!Number.isInteger(count)) {
+      throw new Error("side must be a mapping of unit to count");
+    }
+    if (count < 0) throw new Error(`unit count must be at least 1: ${input.dataset.unit}`);
+    if (count === 0) continue;
+    composition[input.dataset.unit] = count;
+  }
+  return composition;
+}
+
+const RESOURCE_ORDER = ["wood", "wine", "crystal", "sulfur"];
+const RESOURCE_LABELS = {
+  wood: "дерево",
+  wine: "вино",
+  crystal: "хрусталь",
+  sulfur: "сера",
+};
+const WINNER_LABELS = {
+  defender: "Защитник",
+  attacker: "Нападающий",
+  draw: "Ничья",
+};
+const SIDE_LABELS = [["defender", "Защитник"], ["attacker", "Нападающий"]];
+
+function element(tag, text) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function unitsInOrder(units) {
+  const grouped = {};
+  for (const line of LINE_ORDER) grouped[line] = [];
+  for (const unit of Object.values(units)) grouped[unit.line].push(unit);
+  const ordered = [];
+  for (const line of LINE_ORDER) ordered.push(...grouped[line]);
+  return ordered;
+}
+
+function stackPrice(unit, count) {
+  const resources = {};
+  for (const [key, amount] of Object.entries(unit.cost)) resources[key] = amount * count;
+  return { resources, upkeep: unit.upkeep * count };
+}
+
+function resourceText(resources) {
+  const parts = [];
+  for (const key of RESOURCE_ORDER) {
+    const amount = resources[key] || 0;
+    if (amount) parts.push(`${RESOURCE_LABELS[key]} ${amount}`);
+  }
+  return parts.join(", ");
+}
+
+function priceText(resources, upkeep) {
+  const parts = [];
+  const resourcesLine = resourceText(resources);
+  if (resourcesLine) parts.push(resourcesLine);
+  parts.push(`содержание ${upkeep}`);
+  return parts.join(", ");
+}
+
+function sideColumns(parent, fill) {
+  const sides = element("div");
+  sides.className = "sides";
+  for (const [side, title] of SIDE_LABELS) {
+    const column = element("section");
+    column.append(element("h4", title));
+    fill(column, side);
+    sides.append(column);
+  }
+  parent.append(sides);
+}
+
+function renderInitial(parent, compositions, units) {
+  const section = element("section");
+  section.append(element("h2", "Первоначальная расстановка"));
+  sideColumns(section, (column, side) => {
+    const composition = compositions[side];
+    const present = unitsInOrder(units).filter((unit) => composition[unit.name]);
+    if (!present.length) column.append(element("p", "нет войск"));
+    for (const unit of present) {
+      const count = composition[unit.name];
+      const priced = stackPrice(unit, count);
+      column.append(element("p", `${unit.title}: ${count} — ${priceText(priced.resources, priced.upkeep)}`));
+    }
+    const total = armyCost(composition, units);
+    column.append(element("p", `Итого: ${priceText(total.resources, total.upkeep)}`));
+  });
+  parent.append(section);
+}
+
+function fieldUnits(field) {
+  const merged = new Map();
+  const order = [];
+  for (const line of LINE_ORDER) {
+    const lineUnits = field[line];
+    if (!lineUnits) continue;
+    for (const [name, shot] of Object.entries(lineUnits)) {
+      let row = merged.get(name);
+      if (!row) {
+        row = { count: 0, healthWeight: 0 };
+        merged.set(name, row);
+        order.push(name);
+      }
+      row.count += shot.count;
+      row.healthWeight += shot.health * shot.count;
+    }
+  }
+  return order.map((name) => {
+    const row = merged.get(name);
+    return { name, count: row.count, health: row.healthWeight / row.count };
+  });
+}
+
+function renderRound(parent, fought, index, last, units, winner) {
+  const section = element("section");
+  section.append(element("h2", `Раунд ${index + 1}`));
+  section.append(element("h3", "Расстановка"));
+  sideColumns(section, (column, side) => {
+    const losses = fought[side].losses;
+    for (const shot of fieldUnits(fought[side].field)) {
+      const unit = units[shot.name];
+      const lost = losses[shot.name] || 0;
+      const health = Math.round(shot.health * 100);
+      column.append(element("p", `${unit.title}: ${shot.count}/${health}% - ${lost}`));
+    }
+  });
+  section.append(element("h3", "Потери"));
+  sideColumns(section, (column, side) => {
+    const losses = fought[side].losses;
+    const lost = unitsInOrder(units).filter((unit) => losses[unit.name]);
+    if (!lost.length) column.append(element("p", "потерь нет"));
+    for (const unit of lost) {
+      const count = losses[unit.name];
+      const resources = resourceText(stackPrice(unit, count).resources);
+      const line = resources ? `${unit.title}: ${count} — ${resources}` : `${unit.title}: ${count}`;
+      column.append(element("p", line));
+    }
+    const total = armyCost(losses, units);
+    column.append(element("p", `Итого: ${priceText(total.resources, total.upkeep)}`));
+  });
+  if (last) {
+    section.append(element("p", `Победитель: ${WINNER_LABELS[winner] || winner}`));
+  }
+  parent.append(section);
+}
+
+function renderReport(battle, compositions, units) {
+  const report = document.getElementById("report");
+  report.replaceChildren();
+  renderInitial(report, compositions, units);
+  battle.rounds.forEach((fought, index) => {
+    const last = index === battle.rounds.length - 1;
+    renderRound(report, fought, index, last, units, battle.winner);
+  });
+}
+
+function showError(message) {
+  const report = document.getElementById("report");
+  report.replaceChildren(element("p", message));
+  document.getElementById("output").value = message;
+}
+
+function showView(view) {
+  document.getElementById("report").hidden = view !== "html";
+  document.getElementById("output").hidden = view !== "yaml";
+}
+
+function onCalculate() {
+  try {
+    if (typeof jsyaml === "undefined") throw new Error("js-yaml не загрузился");
+    const kind = document.querySelector('input[name="kind"]:checked').value;
+    const form = document.querySelector(`form[data-type="${kind}"]`);
+    const loaded = {
+      type: kind,
+      level: Number(form.querySelector("select").value),
+      defender: readSide(form, "defender"),
+      attacker: readSide(form, "attacker"),
+    };
+    const battle = runBattle(loaded);
+    document.getElementById("output").value = jsyaml.dump(battle, { sortKeys: false, lineWidth: -1, noRefs: true });
+    renderReport(battle, loaded, CATALOGS[kind].forces.units);
+  } catch (error) {
+    showError(error && error.message ? error.message : String(error));
+  }
+}
+
+if (typeof document !== "undefined") {
+  const forms = document.getElementById("forms");
+  forms.append(buildForm("army", ARMY), buildForm("navy", NAVY));
+  for (const radio of document.querySelectorAll('input[name="kind"]')) {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      for (const form of forms.querySelectorAll("form")) {
+        form.hidden = form.dataset.type !== radio.value;
+      }
+    });
+  }
+  document.getElementById("run").addEventListener("click", onCalculate);
+  for (const radio of document.querySelectorAll('input[name="view"]')) {
+    radio.addEventListener("change", () => {
+      if (radio.checked) showView(radio.value);
+    });
+  }
+}
+
+globalThis.runBattle = runBattle;
+</script>
+</body>
+</html>
